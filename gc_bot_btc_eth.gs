@@ -36,6 +36,7 @@ function setup() {
 function resetSim() {
   const p = props_(), keys = ['LAST_ERR'];
   COINS.forEach(c => keys.push('SIM_' + c, 'LEDGER_' + c, 'OPEN_' + c));
+  keys.push('PENDING');
   keys.forEach(k => p.deleteProperty(k));
   const s = sheets_();
   if (s.trades.getLastRow() > 1) s.trades.deleteRows(2, s.trades.getLastRow() - 1);
@@ -49,10 +50,11 @@ function main() {
   if (!lock.tryLock(10000)) return;
   const status = {};
   try {
+    flushPending_();
     COINS.forEach(c => { status[c] = stepCoin_(c, null); });   // 残高は銘柄ごとに最新を取得
-    summary_(status);
+    try { summary_(status); } catch (e) { console.log('サマリー更新失敗: ' + e.message); }
   } catch (e) {
-    log_('✖ エラー: ' + e.message);
+    log_('✖ エラー: ' + e.message);   // log_ 自体は失敗しても止まらない
     const last = JSON.parse(props_().getProperty('LAST_ERR') || '{}');
     if (last.msg !== e.message || Date.now() - last.t > 3600000) {
       notify_('botエラー', e.message);
@@ -63,7 +65,7 @@ function main() {
 
 function stepCoin_(coin, account) {
   const SYM = coin.toUpperCase(), sig = signal_(coin);
-  const t = JSON.parse(UrlFetchApp.fetch('https://coincheck.com/api/ticker?pair=' + coin + '_jpy').getContentText());
+  const t = fetchJson_('https://coincheck.com/api/ticker?pair=' + coin + '_jpy');
   const bid = Number(t.bid), ask = Number(t.ask);
   let bal = balance_(coin, account);
   const holding = bal.coin >= MIN_ORDER[coin];
@@ -75,12 +77,12 @@ function stepCoin_(coin, account) {
     } else {
       const after = buy_(coin, amountJpy, ask, bal);
       const got = after.coin - bal.coin, paid = bal.jpy - after.jpy, price = paid / got;
-      const sh = sheets_().trades;
-      sh.appendRow([sh.getLastRow(), SYM, new Date(), Math.round(price), round8_(got), Math.round(paid),
-                    '', '', '', '', '', '', '', DRY_RUN ? 'お試し' : '本番']);
-      props_().setProperty('OPEN_' + coin, JSON.stringify({row: sh.getLastRow(), time: Date.now(), jpy: paid}));
-      log_(`▶ ${SYM} 買い ${Math.round(paid).toLocaleString()}円 → ${round8_(got)}${SYM} @${Math.round(price).toLocaleString()} | ${sig.text}`);
+      const now = Date.now();
+      props_().setProperty('OPEN_' + coin, JSON.stringify({row: null, time: now, jpy: paid}));   // 先に保有の情報を保存
       notify_(`${SYM}買い`, `${Math.round(paid).toLocaleString()}円分を買いました\n価格 ${Math.round(price).toLocaleString()}円 / 数量 ${round8_(got)} ${SYM}\n${sig.text}`);
+      log_(`▶ ${SYM} 買い ${Math.round(paid).toLocaleString()}円 → ${round8_(got)}${SYM} @${Math.round(price).toLocaleString()} | ${sig.text}`);
+      record_({type: 'buy', coin: coin, time: now,
+               row: ['', SYM, jst_(now), Math.round(price), round8_(got), Math.round(paid), '', '', '', '', '', '', '', DRY_RUN ? 'お試し' : '本番']});
       bal = after;
     }
   } else if (!sig.want && holding) {
@@ -90,11 +92,11 @@ function stepCoin_(coin, account) {
     const open = JSON.parse(props_().getProperty('OPEN_' + coin) || 'null') || findOpenRow_(SYM);
     if (open) {
       const pnl = got - open.jpy, pct = pnl / open.jpy * 100, hrs = (Date.now() - open.time) / 3600000;
-      sheets_().trades.getRange(open.row, 7, 1, 7).setValues([[new Date(), Math.round(price), Math.round(got),
-        Math.round(pnl), Math.round(pct * 100) / 100, Math.round(hrs * 10) / 10, pnl >= 0 ? '勝ち' : '負け']]);
-      log_(`▶ ${SYM} 売り ${amount}${SYM} @${Math.round(price).toLocaleString()} 損益 ${Math.round(pnl).toLocaleString()}円（${pct.toFixed(2)}%）保有${hrs.toFixed(1)}時間 | ${sig.text}`);
       notify_(pnl >= 0 ? `${SYM}売り（勝ち）` : `${SYM}売り（負け）`,
         `損益 ${Math.round(pnl).toLocaleString()}円（${pct.toFixed(2)}%）/ 保有 ${hrs.toFixed(1)}時間\n決済価格 ${Math.round(price).toLocaleString()}円\n${sig.text}`);
+      log_(`▶ ${SYM} 売り ${amount}${SYM} @${Math.round(price).toLocaleString()} 損益 ${Math.round(pnl).toLocaleString()}円（${pct.toFixed(2)}%）保有${hrs.toFixed(1)}時間 | ${sig.text}`);
+      record_({type: 'sell', sym: SYM, row: open.row, values: [jst_(Date.now()), Math.round(price), Math.round(got),
+        Math.round(pnl), Math.round(pct * 100) / 100, Math.round(hrs * 10) / 10, pnl >= 0 ? '勝ち' : '負け']});
     } else {
       log_(`▶ ${SYM} 売り ${amount}${SYM} @${Math.round(price).toLocaleString()}（記録外のポジション）`);
     }
@@ -122,7 +124,7 @@ function findOpenRow_(SYM) {
 // ================= シグナル（Kraken公開データ、確定足のみ） =================
 function closes_(coin, interval) {
   const url = `https://api.kraken.com/0/public/OHLC?pair=${KRAKEN_PAIR[coin]}&interval=${interval}`;
-  const r = JSON.parse(UrlFetchApp.fetch(url, {muteHttpExceptions: true}).getContentText());
+  const r = fetchJson_(url);
   if (r.error && r.error.length) throw new Error('Kraken: ' + r.error.join(','));
   const key = Object.keys(r.result).find(k => k !== 'last');
   return r.result[key].slice(0, -1).map(x => Number(x[4]));
@@ -143,7 +145,7 @@ function balance_(coin, account) {
     const s = JSON.parse(props_().getProperty('SIM_' + coin) || JSON.stringify({jpy: budget_(coin), coin: 0}));
     return {jpy: s.jpy, coin: s.coin};
   }
-  const b = account || ccPrivate_('get', '/api/accounts/balance');
+  const b = account || retry_(() => ccPrivate_('get', '/api/accounts/balance'));
   const ledger = Number(props_().getProperty('LEDGER_' + coin) || budget_(coin));
   return {jpy: Math.min(ledger, Number(b.jpy)), coin: Number(b[coin]), accountJpy: Number(b.jpy)};
 }
@@ -217,6 +219,54 @@ function summary_(status) {
   s.summary.autoResizeColumns(1, 2);
 }
 
+// ================= 失敗に強くするための仕組み =================
+// 一時的な通信エラーに備えて、読み取り系の処理は数回やり直す（注文は二重発注を防ぐため再試行しない）
+function retry_(fn, tries) {
+  let err;
+  for (let i = 0; i < (tries || 3); i++) {
+    try { return fn(); } catch (e) { err = e; Utilities.sleep(2000 * (i + 1)); }
+  }
+  throw err;
+}
+function fetchJson_(url) {
+  return retry_(() => {
+    const r = UrlFetchApp.fetch(url, {muteHttpExceptions: true});
+    if (r.getResponseCode() >= 500) throw new Error(`HTTP ${r.getResponseCode()}: ${url}`);
+    return JSON.parse(r.getContentText());
+  });
+}
+// 取引履歴への書き込み。失敗したら内容を保存しておき、次の実行で書き込む
+function record_(op) {
+  try { applyRecord_(op); }
+  catch (e) {
+    const q = JSON.parse(props_().getProperty('PENDING') || '[]'); q.push(op);
+    props_().setProperty('PENDING', JSON.stringify(q));
+    console.log('取引履歴の書き込みを保留: ' + e.message);
+  }
+}
+function applyRecord_(op) {
+  retry_(() => {
+    const sh = sheets_().trades;
+    if (op.type === 'buy') {
+      op.row[0] = sh.getLastRow();          // No（何回目の取引か）
+      sh.appendRow(op.row);
+      const open = JSON.parse(props_().getProperty('OPEN_' + op.coin) || 'null');
+      if (open && open.time === op.time) { open.row = sh.getLastRow(); props_().setProperty('OPEN_' + op.coin, JSON.stringify(open)); }
+    } else {
+      const open = op.row ? {row: op.row} : findOpenRow_(op.sym);
+      if (open && open.row) sh.getRange(open.row, 7, 1, 7).setValues([op.values]);
+    }
+  });
+}
+function flushPending_() {
+  const q = JSON.parse(props_().getProperty('PENDING') || '[]');
+  if (!q.length) return;
+  const left = [];
+  q.forEach(op => { try { applyRecord_(op); } catch (e) { left.push(op); } });
+  if (left.length) props_().setProperty('PENDING', JSON.stringify(left)); else props_().deleteProperty('PENDING');
+  if (left.length < q.length) log_(`保留していた取引履歴を${q.length - left.length}件書き込みました`);
+}
+
 // ================= シート・通知・補助 =================
 function sheets_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -232,7 +282,10 @@ function sheets_() {
     log: get('ログ', ['日時', '内容'])
   };
 }
-function log_(msg) { sheets_().log.appendRow([new Date(), msg]); console.log(msg); }
+function log_(msg) {
+  console.log(msg);
+  try { retry_(() => sheets_().log.appendRow([new Date(), msg]), 2); } catch (e) { console.log('ログの書き込み失敗: ' + e.message); }
+}
 function notify_(subject, body) {
   const mode = DRY_RUN ? '【お試し】' : '【本番】';
   if (NOTIFY_EMAIL) {
@@ -246,6 +299,7 @@ function notify_(subject, body) {
     } catch (e) { console.log('Discord送信失敗: ' + e.message); }
   }
 }
+function jst_(t) { return Utilities.formatDate(new Date(t), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm:ss'); }
 function round8_(x) { return Math.round(x * 1e8) / 1e8; }
 function props_() { return PropertiesService.getScriptProperties(); }
 

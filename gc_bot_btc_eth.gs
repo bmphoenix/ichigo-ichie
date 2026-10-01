@@ -67,6 +67,7 @@ function stepCoin_(coin, account) {
   const SYM = coin.toUpperCase(), sig = signal_(coin);
   const t = fetchJson_('https://coincheck.com/api/ticker?pair=' + coin + '_jpy');
   const bid = Number(t.bid), ask = Number(t.ask);
+  trackSpread_(coin, bid, ask);
   let bal = balance_(coin, account);
   const holding = bal.coin >= MIN_ORDER[coin];
 
@@ -211,13 +212,40 @@ function summary_(status) {
               [`【${SYM}】評価額（円）`, Math.round(x.bal.jpy + x.bal.coin * x.bid)],
               [`【${SYM}】含み損益（円）`, open ? Math.round(x.bal.coin * x.bid - open.jpy) : '-'],
               [`【${SYM}】決済済み損益（円）`, Math.round(st.pnl)],
-              [`【${SYM}】取引回数・勝率`, `${st.n}回（勝率 ${st.rate}）`], ['', '']);
+              [`【${SYM}】取引回数・勝率`, `${st.n}回（勝率 ${st.rate}）`],
+              [`【${SYM}】平均スプレッド（＝成行の往復コスト）`, sprText_(c)], ['', '']);
   });
   s.summary.clear();
   s.summary.getRange(1, 1, rows.length, 2).setValues(rows);
   s.summary.getRange(1, 1, rows.length, 1).setFontWeight('bold');
   s.summary.autoResizeColumns(1, 2);
 }
+
+// ================= スプレッドの記録（実際の売買コストの検証用） =================
+// 5分ごとの買値・売値の差（%）を集計し、1時間ごとに「スプレッド」シートへ平均・最小・最大を書き出す
+function trackSpread_(coin, bid, ask) {
+  try {
+    if (!(bid > 0 && ask > 0)) return;
+    const sp = (ask - bid) / ask * 100, hour = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:00');
+    const key = 'SPR_' + coin, all = 'SPRALL_' + coin;
+    let h = JSON.parse(props_().getProperty(key) || 'null');
+    if (h && h.hour !== hour) {          // 1時間が終わったらシートに書き出す
+      retry_(() => sheets_().spread.appendRow([h.hour, coin.toUpperCase(), r4_(h.sum / h.n), r4_(h.min), r4_(h.max), h.n]), 2);
+      h = null;
+    }
+    h = h || {hour: hour, n: 0, sum: 0, min: 999, max: 0};
+    h.n++; h.sum += sp; h.min = Math.min(h.min, sp); h.max = Math.max(h.max, sp);
+    props_().setProperty(key, JSON.stringify(h));
+    const a = JSON.parse(props_().getProperty(all) || '{"n":0,"sum":0,"max":0}');
+    a.n++; a.sum += sp; a.max = Math.max(a.max, sp);
+    props_().setProperty(all, JSON.stringify(a));
+  } catch (e) { console.log('スプレッド記録失敗: ' + e.message); }
+}
+function sprText_(coin) {
+  const a = JSON.parse(props_().getProperty('SPRALL_' + coin) || 'null');
+  return a && a.n ? `${(a.sum / a.n).toFixed(3)}%（最大 ${a.max.toFixed(3)}%、${a.n}回計測）` : '計測中';
+}
+function r4_(x) { return Math.round(x * 10000) / 10000; }
 
 // ================= 失敗に強くするための仕組み =================
 // 一時的な通信エラーに備えて、読み取り系の処理は数回やり直す（注文は二重発注を防ぐため再試行しない）
@@ -279,7 +307,8 @@ function sheets_() {
     summary: get('サマリー'),
     trades: get('取引履歴', ['No', '銘柄', 'エントリー日時', 'エントリー価格', '数量', '投入額(円)', '決済日時', '決済価格',
                             '受取額(円)', '損益(円)', '損益率(%)', '保有時間(h)', '結果', 'モード']),
-    log: get('ログ', ['日時', '内容'])
+    log: get('ログ', ['日時', '内容']),
+    spread: get('スプレッド', ['時間帯', '銘柄', '平均スプレッド(%)', '最小(%)', '最大(%)', '計測回数'])
   };
 }
 function log_(msg) {

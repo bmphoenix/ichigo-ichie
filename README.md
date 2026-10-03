@@ -1,84 +1,92 @@
-# BTC＋ETH 自動売買bot
+# Ichigo Ichie
 
-Coincheckの現物で、BTCとETHを自動売買するGoogle Apps Script（GAS）のbotです。
-資金をBTCとETHに半分ずつ割り当て、それぞれの予算の範囲で売買します。ロングのみ・レバレッジなし。
+*"Ichigo ichie" (一期一会) is a Japanese phrase meaning "one time, one meeting" — treasure every encounter, because it may never come again. No market ever comes twice either, so this bot uses simple rules built to survive whatever comes next. It is free and open source for everyone I meet.*
 
-## ファイル
+日本語版: [README_ja.md](README_ja.md)
 
-| ファイル | 内容 | 状態 |
+## What it is
+
+
+A long-only trend-following bot (Google Apps Script) that trades BTC and ETH on the Coincheck spot market.
+Capital is split 50/50 between BTC and ETH, and each coin trades only within its own budget. Long-only, no leverage.
+
+## Files
+
+| File | Description | Status |
 |---|---|---|
-| `gc_bot_btc_eth.gs` | GC版（メイン） | お試し運用中 |
-| `dow_bot.gs` | ダウ版（GC版＋ダウ理論の条件） | お試しで比較中 |
-| `README.md` | この説明 | |
+| `gc_bot_btc_eth.gs` | GC version (main) | Paper trading |
+| `dow_bot.gs` | Dow version (GC rules + Dow theory filter) | Paper trading for comparison |
+| `README.md` | This document | |
 
-## ルール
+## Rules
 
-### GC版
+### GC version
 
-銘柄ごとに、次の2つがそろっている間だけ保有し、どちらかが崩れたら売って円で待機します。
+For each coin, hold only while both conditions are true; when either breaks, sell and wait in JPY.
 
-1. 15分足のEMA50がEMA200より上（ゴールデンクロスの状態）
-2. 4時間足の終値がEMA200より上（上昇トレンド）
+1. On the 15-minute chart, EMA50 is above EMA200 (golden cross state)
+2. On the 4-hour chart, the close is above EMA200 (uptrend)
 
-### ダウ版
+### Dow version
 
-GC版の2つに、次の条件を加えたものです。
+Adds one more condition to the GC version:
 
-3. 4時間足のダウ理論で上昇トレンド（山と谷を左右3本で判定。高値と安値が切り上がっていれば上昇、直近の押し安値を割ったら終了）
+3. Dow theory uptrend on the 4-hour chart (swing highs/lows confirmed with 3 bars on each side; uptrend when both highs and lows are rising, ends when price closes below the latest swing low)
 
-ダウ版は、揉み合いの相場での「だまし」を減らせる一方、入るのが遅くなるため、一気に上がる相場では出遅れやすくなります。
+The Dow version filters out more false signals in choppy markets, but enters later, so it can lag in sharp one-way rallies.
 
-## バックテスト
+## Backtest
 
-BTC＋ETHを半分ずつ、シグナルの次の足で約定、Coincheckの実測スプレッド（BTC 0.015%、ETH 0.1%）込み。
+BTC + ETH 50/50, orders filled at the open of the bar after the signal, using spreads measured on Coincheck (BTC 0.015%, ETH 0.1%).
 
-| 期間 | GC版 | ダウ版 |
+| Period | GC version | Dow version |
 |---|---|---|
-| 2018年4月〜2026年9月 | 約58倍、最大DD -28% | 約38倍、最大DD -30% |
-| 2023年〜 | +195%、最大DD -24% | +280%、最大DD -17% |
-| 半減期（2024年4月）〜 | +73%、最大DD -25% | +97%、最大DD -19% |
-| 2025年〜 | +20%、最大DD -25% | +42%、最大DD -17% |
+| Apr 2018 – Sep 2026 | ~58x, max DD -28% | ~38x, max DD -30% |
+| 2023 – | +195%, max DD -24% | +280%, max DD -17% |
+| Since halving (Apr 2024) | +73%, max DD -25% | +97%, max DD -19% |
+| 2025 – | +20%, max DD -25% | +42%, max DD -17% |
 
-全期間ではGC版、ここ数年の揉み合いの多い相場ではダウ版が優勢です。お試し運用で並べて比較しています。
+### Yearly returns (fresh start each January)
 
-### GC版の年別（毎年1月に開始、往復0.1%）
+| Year | GC version | Dow version | Hold BTC + ETH 50/50 |
+|---|---|---|---|
+| 2018 (from Apr) | -2.6% | -16.4% | -56.8% |
+| 2019 | +86.9% | +66.6% | +46.4% |
+| 2020 | +272.7% | +268.6% | +387.3% |
+| 2021 | +179.2% | +97.9% | +231.3% |
+| 2022 | +0.6% | -4.0% | -66.0% |
+| 2023 | +41.6% | +60.1% | +123.0% |
+| 2024 | +76.4% | +71.5% | +83.6% |
+| 2025 | +6.9% | +19.8% | -8.6% |
+| 2026 (to Sep) | +14.5% | +21.4% | -6.6% |
 
-| 年 | GC版 | BTC＋ETHを半分ずつ保有 |
-|---|---|---|
-| 2018（4月〜） | -4.0% | -56.8% |
-| 2019 | +81.8% | +46.4% |
-| 2020 | +263.0% | +387.3% |
-| 2021 | +173.6% | +231.3% |
-| 2022 | -0.9% | -66.0% |
-| 2023 | +36.2% | +123.0% |
-| 2024 | +71.3% | +83.6% |
-| 2025 | +4.3% | -8.6% |
-| 2026（〜9月） | +12.1% | -6.6% |
+Annualized: GC version ~61% (since 2018) / ~34% (since 2023); Dow version ~54% (since 2018) / ~43% (since 2023).
+The GC version is stronger over the full period, while the Dow version has done better in the choppier markets of recent years. Both are being paper-traded side by side.
 
-勝率は3割前後、最大23連敗（2025年1〜4月）。利益の大半は少数の大きなトレンドから来ます。
-過去データでの検証結果であり、将来の成績を保証するものではありません。
+Win rate is around 30%, with a longest losing streak of 23 trades (Jan–Apr 2025). Most of the profit comes from a small number of large trends.
+Sharpe ratio ~1.45 (buy-and-hold ~0.74). These are backtest results on historical data and do not guarantee future performance. Not investment advice.
 
-## 仕組み
+## How it works
 
-- 5分ごとに自動で判定（Krakenの公開データで計算し、CoincheckのBTC/JPY・ETH/JPYで売買）
-- 売買・エラーをメールとDiscordに通知（記録より先に送る）
-- スプレッドシートに「サマリー」「取引履歴」「ログ」「スプレッド」を記録
-- 通信の一時的なエラーは自動で再試行、書き込めなかった記録は保留して次回書き込み（注文は二重発注を防ぐため再試行しない）
-- Coincheck・bitFlyer・bitbank・GMOコインのスプレッドを比較して記録
+- Runs every 5 minutes (signals from Kraken public data; orders on Coincheck BTC/JPY and ETH/JPY)
+- Sends trade and error notifications by email and Discord (notification is sent before writing records)
+- Records to Google Sheets: Summary, Trade history, Log, Spread
+- Retries temporary network errors; records that fail to write are queued and written on the next run (orders are never retried, to avoid double orders)
+- Tracks and compares bid/ask spreads on Coincheck, bitFlyer, bitbank and GMO Coin
 
-## 使い方
+## Setup
 
-1. Googleスプレッドシートを新規作成 →「拡張機能」→「Apps Script」に `.gs` ファイルの中身を貼って保存
-2. 「プロジェクトの設定」→「スクリプト プロパティ」に登録（任意）
-   - `NOTIFY_EMAIL`：通知先メールアドレス
-   - `DISCORD_URL`：Discord Webhook URL
-3. 関数 `testNotify` で通知を確認 → 関数 `setup` を1回実行（5分ごとに自動実行）
-4. 本番にするときは、スクリプト プロパティに `CC_KEY` と `CC_SECRET`（CoincheckのAPIキー、出金権限なし）を登録し、`DRY_RUN` を `false` にして `resetSim` を実行
+1. Create a new Google Sheet → Extensions → Apps Script, paste the contents of the `.gs` file and save
+2. Project Settings → Script Properties (optional):
+   - `NOTIFY_EMAIL`: email address for notifications
+   - `DISCORD_URL`: Discord webhook URL
+3. Run `testNotify` to check notifications → run `setup` once (runs automatically every 5 minutes)
+4. To go live: add `CC_KEY` and `CC_SECRET` (Coincheck API key, no withdrawal permission) to Script Properties, set `DRY_RUN` to `false`, then run `resetSim`
 
-GC版とダウ版は、それぞれ別のスプレッドシートで動かしてください（同じスクリプトに入れると記録が混ざります）。
-同じCoincheck口座で、2つを同時に本番にしないでください。
+Run the GC version and the Dow version in separate spreadsheets (putting both in one script will mix their records).
+Do not run both live on the same Coincheck account at the same time.
 
-## 注意
+## Notes
 
-- APIキー・Webhook URL・メールアドレスなどの秘密情報は、コードに直接書かず、スクリプト プロパティに登録してください
-- 暗号資産の利益は雑所得として課税されます
+- Never write secrets (API keys, webhook URLs, email addresses) directly in the code; use Script Properties
+- In Japan, crypto gains are taxed as miscellaneous income

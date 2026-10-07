@@ -16,6 +16,8 @@ Capital is split 50/50 between BTC and ETH, and each coin trades only within its
 |---|---|---|
 | `gc_bot_btc_eth.gs` | GC version (main) | Paper trading |
 | `dow_bot.gs` | Dow version (GC rules + Dow theory filter) | Paper trading for comparison |
+| `ichigo_ichie_backtest.pine` | TradingView backtest (GC; Dow switchable in settings) | Verification |
+| `ichigo_ichie_dow_backtest.pine` | TradingView backtest (Dow) | Verification |
 | `README.md` | This document | |
 
 ## Rules
@@ -31,7 +33,9 @@ For each coin, hold only while both conditions are true; when either breaks, sel
 
 Adds one more condition to the GC version:
 
-3. Dow theory uptrend on the 4-hour chart (swing highs/lows confirmed with 3 bars on each side; uptrend when both highs and lows are rising, ends when price closes below the latest swing low)
+3. Dow theory uptrend on the 4-hour chart (swings confirmed with 3 bars on each side; uptrend when the latest swing high and low are both higher. A close below the latest swing low switches it off, but if the higher-high/higher-low structure is still intact and price recovers that low, it switches back on without waiting for new swings. A close above the latest swing high while lows are rising also switches it on.)
+
+Note: a stricter version that waits for a new swing high and low after a break was also tested; it performed worse over both the full period and recent years, so it was not adopted.
 
 The Dow version filters out more false signals in choppy markets, but enters later, so it can lag in sharp one-way rallies.
 
@@ -65,6 +69,19 @@ The GC version is stronger over the full period, while the Dow version has done 
 
 Win rate is around 30%, with a longest losing streak of 23 trades (Jan–Apr 2025). Most of the profit comes from a small number of large trends.
 Sharpe ratio ~1.45 (buy-and-hold ~0.74). These are backtest results on historical data and do not guarantee future performance. Not investment advice.
+
+## Independent check (TradingView)
+
+Separately from the Python backtest, both versions were re-tested in TradingView's Strategy Tester (`ichigo_ichie_backtest.pine` / `ichigo_ichie_dow_backtest.pine`) on other exchanges' data. Apr 13, 2018 – Oct 2026, 0.1% round-trip fees, filled at the next bar's open.
+
+| | TradingView | Python (Bitstamp) |
+|---|---|---|
+| GC BTC (Coinbase) | ~22.0x, max DD -27.8%, 551 trades, PF 1.36 | ~22.4x, max DD -32.5%, 549 trades |
+| GC ETH (Binance) | ~61.1x, max DD -30.5%, 537 trades, PF 1.31 | ~79.6x, max DD -34.8%, 553 trades |
+| Dow BTC (Coinbase) | ~13.5x, max DD -27.9%, 434 trades, PF 1.49 | ~14.9x, max DD -29.2%, 433 trades |
+| Dow ETH (Binance) | ~37.2x, max DD -33.4%, 414 trades, PF 1.46 | ~49.6x, max DD -40.4%, 435 trades |
+
+Results and trade counts closely match across exchanges and tools.
 
 ## How it works
 

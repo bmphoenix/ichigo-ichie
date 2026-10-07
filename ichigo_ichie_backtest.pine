@@ -1,0 +1,68 @@
+//@version=5
+// Ichigo Ichie ― 15分足GC版 / ダウ版 バックテスト（BTC・ETHの15分足チャートで使う）
+// ルール：15分足EMA50 > EMA200 かつ 4時間足の確定した終値 > EMA200 の間だけ保有（ロングのみ）
+//         ダウ版をオンにすると、4時間足のダウ理論で上昇トレンドのときだけ、という条件が加わる
+// ・シグナルは足の確定時に判定し、次の足の始値で約定（先読みなし）
+// ・4時間足は「確定した足」の値だけを使う（未確定の4時間足は見ない）
+// ・margin_long=0 で、資金の通貨や換算による「マージンコール（強制決済）」が起きないようにしている
+strategy("Ichigo Ichie - 15m GC Backtest", overlay=true,
+     initial_capital=100000, default_qty_type=strategy.percent_of_equity, default_qty_value=99,
+     commission_type=strategy.commission.percent, commission_value=0.05,
+     margin_long=0, margin_short=0, pyramiding=0, process_orders_on_close=false)
+
+// ===== 設定 =====
+fastLen = input.int(50,  "15分足 短期EMA")
+slowLen = input.int(200, "15分足 長期EMA")
+trendTF = input.timeframe("240", "トレンド判定の時間足")
+trendLen= input.int(200, "トレンド判定のEMA")
+useDow  = input.bool(false, "ダウ版（4時間足のダウ理論を条件に加える）")
+dowN    = input.int(3, "ダウ理論：山・谷の判定（左右の本数）", minval=1)
+startT  = input.time(timestamp("2018-04-01 00:00 +0000"), "検証開始日")
+
+// ===== 15分足のゴールデンクロス状態 =====
+emaF = ta.ema(close, fastLen)
+emaS = ta.ema(close, slowLen)
+gc   = emaF > emaS
+
+// ===== 4時間足（確定した足だけ） =====
+c4 = request.security(syminfo.tickerid, trendTF, close[1],                   lookahead=barmerge.lookahead_on)
+e4 = request.security(syminfo.tickerid, trendTF, ta.ema(close, trendLen)[1], lookahead=barmerge.lookahead_on)
+up4 = c4 > e4
+
+// ===== ダウ理論（4時間足）：山・谷は左右N本で確定。高値・安値が両方切り上がれば上昇、押し安値割れで解除 =====
+f_dow(n) =>
+    var float sh1 = na
+    var float sh2 = na
+    var float sl1 = na
+    var float sl2 = na
+    var bool  up  = false
+    ph = ta.pivothigh(high, n, n)
+    pl = ta.pivotlow(low, n, n)
+    if not na(ph)
+        sh2 := sh1
+        sh1 := ph
+    if not na(pl)
+        sl2 := sl1
+        sl1 := pl
+    if not na(sh2) and not na(sl2)
+        if sh1 > sh2 and sl1 > sl2
+            up := true
+        if close < sl1
+            up := false
+        if close > sh1 and sl1 > sl2
+            up := true
+    up
+dowUp = request.security(syminfo.tickerid, trendTF, f_dow(dowN)[1], lookahead=barmerge.lookahead_on)
+
+// ===== 売買 =====
+inRange = time >= startT
+want = gc and up4 and (useDow ? dowUp : true)
+if inRange and want and strategy.position_size == 0
+    strategy.entry("Long", strategy.long)
+if strategy.position_size > 0 and not want
+    strategy.close("Long")
+
+// ===== 表示 =====
+plot(emaF, "EMA短期", color=color.new(color.orange, 0))
+plot(emaS, "EMA長期", color=color.new(color.blue, 0), linewidth=2)
+bgcolor(want ? color.new(color.green, 92) : na, title="保有条件がそろっている")
